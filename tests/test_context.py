@@ -69,3 +69,6 @@ class TestRequiredPackages:
 
     def test_contains_matplotlib(self):
         assert "matplotlib" in CLUSTER_REQUIRED_PACKAGES
+
+    def test_contains_marimo(self):
+        assert "marimo" in CLUSTER_REQUIRED_PACKAGES

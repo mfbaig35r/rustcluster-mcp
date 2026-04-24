@@ -10,6 +10,7 @@ from rustcluster_mcp.server import (
     evaluate_clusters,
     explain_algorithm,
     explain_parameter,
+    fit,
     list_algorithms,
     optimize_k,
     recommend_algorithm,
@@ -215,6 +216,12 @@ class TestAnalyzeData:
         result = await analyze_data(tmp_data_2d, source_type="openai")
         assert result["status"] == "success"
         assert result["source_type"] == "openai"
+
+    async def test_parquet_loading(self, tmp_data_parquet):
+        result = await analyze_data(tmp_data_parquet)
+        assert result["status"] == "success"
+        assert result["n_samples"] == 100
+        assert result["n_features"] == 50
 
 
 # ===========================================================================
@@ -433,6 +440,59 @@ class TestDiagnose:
 # ===========================================================================
 # Advisor tools — data-dependent (integration, @pytest.mark.slow)
 # ===========================================================================
+
+
+class TestFit:
+    async def test_file_not_found(self):
+        result = await fit("/nonexistent/path.npy", algorithm="kmeans", n_clusters=3)
+        assert result["status"] == "error"
+        assert result["error_type"] == "file_error"
+
+    async def test_1d_rejected(self, tmp_data_1d):
+        result = await fit(tmp_data_1d, algorithm="kmeans", n_clusters=3)
+        assert result["status"] == "error"
+        assert "2D" in result["error"]
+
+    async def test_unknown_algorithm(self, tmp_data_2d):
+        result = await fit(tmp_data_2d, algorithm="fake")
+        assert result["status"] == "error"
+        assert "Unknown algorithm" in result["error"]
+
+    async def test_kmeans_requires_n_clusters(self, tmp_data_2d):
+        result = await fit(tmp_data_2d, algorithm="kmeans")
+        assert result["status"] == "error"
+        assert "n_clusters" in result["error"]
+
+    async def test_embedding_cluster_requires_n_clusters(self, tmp_data_2d):
+        result = await fit(tmp_data_2d, algorithm="embedding_cluster")
+        assert result["status"] == "error"
+        assert "n_clusters" in result["error"]
+
+    @pytest.mark.slow
+    async def test_kmeans_integration(self, tmp_data_2d):
+        result = await fit(tmp_data_2d, algorithm="kmeans", n_clusters=3)
+        assert result["status"] == "success"
+        assert result["n_clusters"] == 3
+        assert result["n_samples"] == 100
+        assert result["n_noise"] == 0
+        assert len(result["labels"]) == 100
+        assert "silhouette" in result["metrics"]
+        assert "calinski_harabasz" in result["metrics"]
+        assert "davies_bouldin" in result["metrics"]
+        assert len(result["cluster_sizes"]) == 3
+
+    @pytest.mark.slow
+    async def test_save_labels(self, tmp_data_2d, tmp_path):
+        labels_path = str(tmp_path / "out_labels.npy")
+        result = await fit(
+            tmp_data_2d, algorithm="kmeans", n_clusters=3,
+            save_labels=labels_path,
+        )
+        assert result["status"] == "success"
+        assert result["labels_path"] == labels_path
+        import numpy as np
+        saved = np.load(labels_path)
+        assert len(saved) == 100
 
 
 class TestOptimizeK:

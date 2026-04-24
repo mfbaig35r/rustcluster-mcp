@@ -666,4 +666,5 @@ CLUSTER_REQUIRED_PACKAGES: list[str] = [
     "rustcluster",
     "numpy",
     "matplotlib",
+    "marimo",
 ]

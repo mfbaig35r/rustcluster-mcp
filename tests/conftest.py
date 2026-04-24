@@ -58,6 +58,21 @@ def tmp_data_npz(tmp_path):
 
 
 @pytest.fixture
+def tmp_data_parquet(tmp_path):
+    """Data saved as .parquet for format test."""
+    pytest.importorskip("pyarrow")
+    import pyarrow as pa
+    import pyarrow.parquet as pq
+
+    rng = np.random.default_rng(42)
+    X = rng.standard_normal((100, 50))
+    table = pa.table({f"f{i}": X[:, i] for i in range(50)})
+    path = tmp_path / "data.parquet"
+    pq.write_table(table, path)
+    return str(path)
+
+
+@pytest.fixture
 def tmp_labels(tmp_path):
     """Label array matching tmp_data_2d (100 samples, 3 clusters)."""
     rng = np.random.default_rng(42)

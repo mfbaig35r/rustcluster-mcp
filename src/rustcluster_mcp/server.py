@@ -96,11 +96,21 @@ def error_response(message: str, error_type: str = "error") -> dict[str, Any]:
 
 
 def _load_array(path: str) -> np.ndarray:
-    """Load a numpy array from .npy or .npz file."""
+    """Load a numpy array from .npy, .npz, or .parquet file."""
     if path.endswith(".npz"):
         with np.load(path) as f:
             key = list(f.keys())[0]
             return f[key]
+    if path.endswith(".parquet"):
+        try:
+            import pyarrow.parquet as pq
+        except ImportError:
+            raise ImportError(
+                "pyarrow is required for parquet support. "
+                "Install with: pip install pyarrow"
+            )
+        table = pq.read_table(path)
+        return table.to_pandas().select_dtypes(include=["number"]).to_numpy()
     return np.load(path)
 
 
@@ -201,7 +211,7 @@ async def analyze_data(
     intrinsic dimensionality estimate, and data quality checks (NaN, Inf).
 
     Args:
-        data_path: Path to .npy or .npz file containing the data matrix (n_samples, n_features).
+        data_path: Path to .npy, .npz, or .parquet file containing the data matrix (n_samples, n_features).
         source_type: Optional hint about the embedding source. One of:
             "openai", "cohere", "voyage", "sentence_transformers", "tfidf", "tabular", or None.
             Helps the advisor give more specific recommendations.
@@ -271,6 +281,165 @@ async def analyze_data(
         return error_response(f"File not found: {data_path}", "file_error")
     except Exception as exc:
         return error_response(f"Analysis failed: {exc}", "internal_error")
+
+
+# ===========================================================================
+# Direct clustering — no sandbox needed
+# ===========================================================================
+
+@mcp.tool()
+async def fit(
+    data_path: str,
+    algorithm: str = "embedding_cluster",
+    n_clusters: int | None = None,
+    reduction_dim: int | None = 128,
+    metric: str = "euclidean",
+    min_cluster_size: int = 15,
+    eps: float = 0.5,
+    min_samples: int = 5,
+    linkage: str = "ward",
+    n_init: int = 5,
+    random_state: int = 0,
+    save_labels: str | None = None,
+    save_centers: str | None = None,
+) -> dict[str, Any]:
+    """Run clustering directly on a data file and return results with metrics.
+
+    This is the primary tool for actually clustering data — no sandbox needed.
+    Pass a data file, pick an algorithm, and get back labels, metrics, and
+    cluster size distribution.
+
+    Args:
+        data_path: Path to .npy, .npz, or .parquet file.
+        algorithm: Algorithm to use. One of:
+            "kmeans", "minibatch_kmeans", "dbscan", "hdbscan",
+            "agglomerative", "embedding_cluster".
+        n_clusters: Number of clusters (required for kmeans, minibatch_kmeans,
+            agglomerative, embedding_cluster). Ignored for dbscan/hdbscan.
+        reduction_dim: PCA reduction dimension (embedding_cluster only). None to skip.
+        metric: Distance metric: "euclidean", "cosine", "manhattan" (algorithm-dependent).
+        min_cluster_size: Minimum cluster size (hdbscan only).
+        eps: Neighborhood radius (dbscan only).
+        min_samples: Core point threshold (dbscan/hdbscan only).
+        linkage: Merge criterion (agglomerative only): "ward", "complete", "average", "single".
+        n_init: Number of random restarts (kmeans/embedding_cluster only).
+        random_state: Random seed for reproducibility.
+        save_labels: If set, save cluster labels to this .npy path.
+        save_centers: If set, save cluster centers to this .npy path (centroid-based only).
+
+    Returns:
+        Clustering results with labels (as list), metrics (silhouette, CH, DB),
+        cluster sizes, and optional saved file paths.
+    """
+    try:
+        X = _load_array(data_path)
+        if X.ndim != 2:
+            return error_response(f"Expected 2D array, got {X.ndim}D", "validation_error")
+
+        import rustcluster
+        from rustcluster.experimental import EmbeddingCluster
+
+        # Build model
+        if algorithm == "kmeans":
+            if n_clusters is None:
+                return error_response("n_clusters is required for kmeans", "validation_error")
+            model = rustcluster.KMeans(
+                n_clusters=n_clusters, metric=metric, n_init=n_init,
+                random_state=random_state,
+            )
+        elif algorithm == "minibatch_kmeans":
+            if n_clusters is None:
+                return error_response("n_clusters is required for minibatch_kmeans", "validation_error")
+            model = rustcluster.MiniBatchKMeans(
+                n_clusters=n_clusters, metric=metric, random_state=random_state,
+            )
+        elif algorithm == "dbscan":
+            model = rustcluster.DBSCAN(eps=eps, min_samples=min_samples, metric=metric)
+        elif algorithm == "hdbscan":
+            model = rustcluster.HDBSCAN(
+                min_cluster_size=min_cluster_size, min_samples=min_samples, metric=metric,
+            )
+        elif algorithm == "agglomerative":
+            if n_clusters is None:
+                return error_response("n_clusters is required for agglomerative", "validation_error")
+            model = rustcluster.AgglomerativeClustering(
+                n_clusters=n_clusters, linkage=linkage, metric=metric,
+            )
+        elif algorithm == "embedding_cluster":
+            if n_clusters is None:
+                return error_response("n_clusters is required for embedding_cluster", "validation_error")
+            model = EmbeddingCluster(
+                n_clusters=n_clusters, reduction_dim=reduction_dim,
+                n_init=n_init, random_state=random_state,
+            )
+        else:
+            valid = "kmeans, minibatch_kmeans, dbscan, hdbscan, agglomerative, embedding_cluster"
+            return error_response(f"Unknown algorithm '{algorithm}'. Valid: {valid}", "validation_error")
+
+        # Fit
+        model.fit(X)
+        labels = model.labels_
+
+        # Eval data (use reduced for EmbeddingCluster)
+        eval_data = X
+        if hasattr(model, "reduced_data_") and model.reduced_data_ is not None:
+            eval_data = model.reduced_data_
+
+        n_clusters_found = len(set(labels)) - (1 if -1 in labels else 0)
+        n_noise = int(np.sum(labels == -1))
+
+        # Metrics
+        metrics = {}
+        if n_clusters_found >= 2:
+            sil = float(rustcluster.silhouette_score(eval_data, labels))
+            ch = float(rustcluster.calinski_harabasz_score(eval_data, labels))
+            db = float(rustcluster.davies_bouldin_score(eval_data, labels))
+            metrics = {
+                "silhouette": round(sil, 4),
+                "calinski_harabasz": round(ch, 2),
+                "davies_bouldin": round(db, 4),
+            }
+
+        # Cluster sizes
+        non_noise = labels[labels >= 0]
+        _, counts = np.unique(non_noise, return_counts=True)
+        sizes = sorted(counts.tolist(), reverse=True)
+
+        result_data: dict[str, Any] = {
+            "algorithm": algorithm,
+            "n_clusters": n_clusters_found,
+            "n_noise": n_noise,
+            "n_samples": len(X),
+            "n_features": X.shape[1],
+            "metrics": metrics,
+            "cluster_sizes": sizes,
+            "labels": labels.tolist(),
+        }
+
+        # Optional model attributes
+        if hasattr(model, "inertia_"):
+            result_data["inertia"] = round(float(model.inertia_), 2)
+        if hasattr(model, "objective_"):
+            result_data["objective"] = round(float(model.objective_), 4)
+        if hasattr(model, "n_iter_"):
+            result_data["n_iter"] = int(model.n_iter_)
+
+        # Save artifacts
+        if save_labels:
+            np.save(save_labels, labels)
+            result_data["labels_path"] = save_labels
+        if save_centers and hasattr(model, "cluster_centers_"):
+            np.save(save_centers, model.cluster_centers_)
+            result_data["centers_path"] = save_centers
+
+        return success_response(**result_data)
+
+    except FileNotFoundError:
+        return error_response(f"File not found: {data_path}", "file_error")
+    except ImportError as exc:
+        return error_response(str(exc), "dependency_error")
+    except Exception as exc:
+        return error_response(f"Clustering failed: {exc}", "internal_error")
 
 
 # ===========================================================================
@@ -628,6 +797,7 @@ async def optimize_k(
     reduction_dim: int | None = 128,
     metric: str = "euclidean",
     random_state: int = 0,
+    max_k_values: int | None = None,
 ) -> dict[str, Any]:
     """Find the optimal number of clusters by evaluating multiple k values.
 
@@ -635,13 +805,15 @@ async def optimize_k(
     and Davies-Bouldin scores. Returns scores, the recommended k, and rationale.
 
     Args:
-        data_path: Path to .npy or .npz file.
+        data_path: Path to .npy, .npz, or .parquet file.
         algorithm: Algorithm to use. One of: "kmeans", "minibatch_kmeans", "embedding_cluster".
         k_range: List of k values to evaluate (e.g., [5, 10, 15, 20, 30, 50]).
             If None, auto-generates based on data size.
         reduction_dim: PCA reduction dimension (only for embedding_cluster). None to skip.
         metric: Distance metric (for kmeans/minibatch_kmeans).
         random_state: Random seed.
+        max_k_values: Maximum number of k values to evaluate. Limits runtime on large datasets.
+            If None, evaluates all values in k_range.
 
     Returns:
         Per-k scores, recommended k with rationale, and score curves for visualization.
@@ -669,6 +841,11 @@ async def optimize_k(
                 k_range = sorted(set([2, 3, 5, 8, 10, 15, 20, 30, 50, 75, 100, 150, 200]) & set(range(2, max_k + 1)))
                 if not k_range:
                     k_range = list(range(2, min(max_k + 1, 21)))
+
+        if max_k_values is not None and len(k_range) > max_k_values:
+            # Evenly sample from the range to stay within budget
+            step = max(1, len(k_range) // max_k_values)
+            k_range = k_range[::step][:max_k_values]
 
         import rustcluster
         from rustcluster.experimental import EmbeddingCluster
@@ -891,7 +1068,7 @@ async def evaluate_clusters(
     plus cluster size distribution analysis and pathology detection.
 
     Args:
-        data_path: Path to .npy or .npz file with the data matrix.
+        data_path: Path to .npy, .npz, or .parquet file with the data matrix.
         labels_path: Path to .npy file with cluster labels (int array, -1 for noise).
 
     Returns:
@@ -1472,6 +1649,7 @@ def _impl_cluster_run_python(
     result = _impl_run_python(
         code=injected_code,
         description=description or "rustcluster analysis",
+        timeout_seconds=120,
         packages=all_packages,
         dry_run=dry_run,
         require_approval=require_approval,
