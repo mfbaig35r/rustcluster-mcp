@@ -39,24 +39,49 @@ from .knowledge_graph import (
 mcp = FastMCP(
     "rustcluster",
     instructions="""\
-Clustering advisor for the rustcluster library. This server has deep knowledge
-of 7 clustering algorithms, 30+ parameters, their interactions, and when to
-use what. It can analyze your data, recommend algorithms, find optimal
-configurations, and diagnose clustering problems.
+Clustering advisor for the rustcluster library. Deep knowledge of 7 algorithms,
+30+ parameters, their interactions, and when to use what.
 
-Typical workflow:
-1. analyze_data — understand what you're working with
-2. recommend_algorithm — get algorithm + config suggestions
-3. suggest_config — get detailed parameter settings with rationale
-4. optimize_k — find the best number of clusters
-5. evaluate_clusters — assess quality with all metrics
-6. diagnose — if something looks wrong, get fix suggestions
+## Data prep
 
-Knowledge tools (no data needed):
+Data must be in .npy, .npz, or .parquet format. If embeddings live in a database
+(DuckDB, Snowflake, Databricks), extract them first:
+    import numpy as np
+    np.save("embeddings.npy", df[embedding_columns].to_numpy())
+
+## Workflow: Plan → Execute → Refine
+
+### Phase 1 — Plan (advisory tools, no clustering runs)
+1. analyze_data — profile your data (dims, normalization, density, quality checks)
+2. recommend_algorithm — get ranked algorithm suggestions for your data + requirements
+3. suggest_config — get a justified config with per-parameter rationale
+
+### Phase 2 — Execute (run clustering directly)
+4. fit — run clustering on your data. Takes a file path + algorithm + params,
+   returns labels, metrics, and cluster sizes. This is the primary execution tool.
+   The output of suggest_config maps directly to fit's parameters.
+5. optimize_k — sweep k values to find the optimum (silhouette, CH, DB scores)
+
+### Phase 3 — Refine
+6. evaluate_clusters — assess quality with all metrics + pathology detection
+7. diagnose — describe what looks wrong, get specific fix recipes
+8. compare_configs — run two configs head-to-head
+
+## When to use run_python instead of fit
+
+Use fit for standard clustering. Use run_python (sandbox) for custom analysis:
+visualization, snapshot operations, hierarchical clustering pipelines, or anything
+that needs multiple steps. run_python injects a __cluster__ helper with methods:
+- __cluster__.load(path) / .fit(algorithm, X, **params) / .sweep_k(X, ...)
+- __cluster__.snapshot() / .visualize_snapshot(X, snap) / .visualize_confidence(X, snap)
+- __cluster__.visualize_drift(snap, report) / .visualize_hierarchical(X, hier_snap)
+- __cluster__.plot_sweep(results) / .plot_sizes(sizes) / .profile(X)
+
+## Knowledge tools (no data needed)
 - explain_algorithm — deep dive into any algorithm
 - explain_parameter — understand what a parameter does and how to tune it
-- list_algorithms — overview of all available algorithms
-- check_config — validate a configuration for anti-patterns
+- list_algorithms — browse all algorithms with capability filtering
+- check_config — validate a configuration against known anti-patterns
 """,
 )
 
@@ -413,8 +438,22 @@ async def fit(
             "n_features": X.shape[1],
             "metrics": metrics,
             "cluster_sizes": sizes,
-            "labels": labels.tolist(),
         }
+
+        # Labels: include inline for small datasets, auto-save for large ones
+        _LABEL_INLINE_LIMIT = 10_000
+        if len(labels) <= _LABEL_INLINE_LIMIT:
+            result_data["labels"] = labels.tolist()
+        else:
+            result_data["labels_truncated"] = labels[:_LABEL_INLINE_LIMIT].tolist()
+            result_data["labels_count"] = len(labels)
+            # Auto-save to temp file if caller didn't specify save_labels
+            if not save_labels:
+                import tempfile
+                auto_path = tempfile.mktemp(suffix="_labels.npy", prefix="rustcluster_")
+                np.save(auto_path, labels)
+                save_labels = auto_path
+                result_data["labels_auto_saved"] = True
 
         # Optional model attributes
         if hasattr(model, "inertia_"):
@@ -426,7 +465,8 @@ async def fit(
 
         # Save artifacts
         if save_labels:
-            np.save(save_labels, labels)
+            if "labels_path" not in result_data:  # don't double-save
+                np.save(save_labels, labels)
             result_data["labels_path"] = save_labels
         if save_centers and hasattr(model, "cluster_centers_"):
             np.save(save_centers, model.cluster_centers_)
