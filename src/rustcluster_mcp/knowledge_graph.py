@@ -74,6 +74,18 @@ class NormalizationState(str, Enum):
     UNKNOWN = "unknown"
 
 
+class Sensitivity(str, Enum):
+    HIGH = "high"
+    MEDIUM = "medium"
+    LOW = "low"
+
+
+class Severity(str, Enum):
+    ERROR = "error"
+    WARNING = "warning"
+    INFO = "info"
+
+
 # ---------------------------------------------------------------------------
 # Layer 1 — Algorithms
 # ---------------------------------------------------------------------------
@@ -120,7 +132,7 @@ class AlgorithmParameter:
     valid_range: dict[str, Any] | None  # {"min": ..., "max": ..., "values": [...]}
     description: str
     semantic_meaning: str       # what does this *conceptually* control?
-    sensitivity: str            # "high", "medium", "low" — how much does it affect results?
+    sensitivity: Sensitivity    # how much does this parameter affect results?
     interactions: list[ParameterInteraction] = field(default_factory=list)
     constraints: list[str] = field(default_factory=list)
     tips: list[str] = field(default_factory=list)
@@ -172,7 +184,7 @@ class AntiPattern:
     description: str
     why_bad: str
     fix: str
-    severity: str               # "error", "warning", "info"
+    severity: Severity
 
 
 # ---------------------------------------------------------------------------
@@ -556,7 +568,7 @@ PARAMETERS: list[AlgorithmParameter] = [
         valid_range={"min": 1, "max": "n_samples"},
         description="Number of clusters to find.",
         semantic_meaning="Controls the granularity of grouping. Higher k = finer-grained clusters.",
-        sensitivity="high",
+        sensitivity=Sensitivity.HIGH,
         interactions=[
             ParameterInteraction("kmeans.n_init", "modulates",
                 "Higher k benefits more from multiple restarts — initialization matters more"),
@@ -578,7 +590,7 @@ PARAMETERS: list[AlgorithmParameter] = [
         valid_range={"min": 1},
         description="Maximum iterations per initialization run.",
         semantic_meaning="Safety limit on convergence. Most runs converge well before 300 iterations.",
-        sensitivity="low",
+        sensitivity=Sensitivity.LOW,
         tips=["Rarely needs tuning. If hitting max_iter, the data may have issues (mixed scales, outliers)."],
     ),
     AlgorithmParameter(
@@ -589,7 +601,7 @@ PARAMETERS: list[AlgorithmParameter] = [
         valid_range={"min": 0.0},
         description="Convergence tolerance on max centroid shift.",
         semantic_meaning="How precisely centroids must stabilize before stopping. Lower = more precise but slower.",
-        sensitivity="low",
+        sensitivity=Sensitivity.LOW,
         tips=["Default 1e-4 is fine for virtually all use cases."],
     ),
     AlgorithmParameter(
@@ -600,7 +612,7 @@ PARAMETERS: list[AlgorithmParameter] = [
         valid_range={"min": 1},
         description="Number of independent runs with different seeds. Best (lowest inertia) wins.",
         semantic_meaning="Robustness against bad initialization. More runs = higher chance of finding global optimum.",
-        sensitivity="medium",
+        sensitivity=Sensitivity.MEDIUM,
         interactions=[
             ParameterInteraction("kmeans.n_clusters", "modulates",
                 "Higher k makes the optimization landscape more complex — more n_init helps"),
@@ -622,7 +634,7 @@ PARAMETERS: list[AlgorithmParameter] = [
             "Lloyd: standard, always works. Hamerly: uses triangle inequality to skip distance "
             "computations — faster for large k on Euclidean data. Auto selects based on d and k."
         ),
-        sensitivity="low",  # affects speed, not results
+        sensitivity=Sensitivity.LOW,  # affects speed, not results
         interactions=[
             ParameterInteraction("kmeans.metric", "conflicts",
                 "Cosine metric forces Lloyd — Hamerly bounds assume Euclidean geometry"),
@@ -641,7 +653,7 @@ PARAMETERS: list[AlgorithmParameter] = [
             "Euclidean: straight-line distance, good for tabular/spatial data. "
             "Cosine: angular similarity, good for normalized vectors / text embeddings."
         ),
-        sensitivity="high",
+        sensitivity=Sensitivity.HIGH,
         interactions=[
             ParameterInteraction("kmeans.algorithm", "conflicts",
                 "Cosine forces Lloyd algorithm (Hamerly bounds don't hold for cosine)"),
@@ -660,7 +672,7 @@ PARAMETERS: list[AlgorithmParameter] = [
         valid_range=None,
         description="Random seed for reproducibility.",
         semantic_meaning="Controls k-means++ initialization and run ordering. Same seed = same results.",
-        sensitivity="low",
+        sensitivity=Sensitivity.LOW,
     ),
 
     # === MiniBatchKMeans ===
@@ -672,7 +684,7 @@ PARAMETERS: list[AlgorithmParameter] = [
         valid_range={"min": 1, "max": "n_samples"},
         description="Number of clusters.",
         semantic_meaning="Same as KMeans — controls grouping granularity.",
-        sensitivity="high",
+        sensitivity=Sensitivity.HIGH,
     ),
     AlgorithmParameter(
         algorithm_id="minibatch_kmeans",
@@ -685,7 +697,7 @@ PARAMETERS: list[AlgorithmParameter] = [
             "Tradeoff between speed and solution quality. Larger batches = better centroids "
             "but slower. When batch_size >= n, degrades to standard K-means."
         ),
-        sensitivity="medium",
+        sensitivity=Sensitivity.MEDIUM,
         interactions=[
             ParameterInteraction("minibatch_kmeans.n_clusters", "modulates",
                 "batch_size should be >> n_clusters for stable centroid updates (aim for 10x k)"),
@@ -704,7 +716,7 @@ PARAMETERS: list[AlgorithmParameter] = [
         valid_range={"min": 1},
         description="Maximum iterations.",
         semantic_meaning="Lower default (100 vs 300) because mini-batches converge faster with early stopping.",
-        sensitivity="low",
+        sensitivity=Sensitivity.LOW,
     ),
     AlgorithmParameter(
         algorithm_id="minibatch_kmeans",
@@ -717,7 +729,7 @@ PARAMETERS: list[AlgorithmParameter] = [
             "Default 0 because stochastic updates don't converge smoothly — "
             "max_no_improvement is the preferred early stopping mechanism."
         ),
-        sensitivity="low",
+        sensitivity=Sensitivity.LOW,
         interactions=[
             ParameterInteraction("minibatch_kmeans.max_no_improvement", "modulates",
                 "tol > 0 enables the max_no_improvement counter"),
@@ -731,7 +743,7 @@ PARAMETERS: list[AlgorithmParameter] = [
         valid_range={"min": 1},
         description="Stop after this many iterations with no inertia improvement.",
         semantic_meaning="Patience counter — prevents wasting compute when centroids have stabilized.",
-        sensitivity="low",
+        sensitivity=Sensitivity.LOW,
     ),
     AlgorithmParameter(
         algorithm_id="minibatch_kmeans",
@@ -741,7 +753,7 @@ PARAMETERS: list[AlgorithmParameter] = [
         valid_range={"values": ["euclidean", "cosine"]},
         description="Distance metric.",
         semantic_meaning="Same as KMeans.",
-        sensitivity="high",
+        sensitivity=Sensitivity.HIGH,
     ),
     AlgorithmParameter(
         algorithm_id="minibatch_kmeans",
@@ -751,7 +763,7 @@ PARAMETERS: list[AlgorithmParameter] = [
         valid_range=None,
         description="Random seed.",
         semantic_meaning="Controls batch sampling and initialization.",
-        sensitivity="low",
+        sensitivity=Sensitivity.LOW,
     ),
 
     # === DBSCAN ===
@@ -766,7 +778,7 @@ PARAMETERS: list[AlgorithmParameter] = [
             "The fundamental density threshold. Points within eps of a core point belong "
             "to its cluster. Too small = everything is noise. Too large = everything is one cluster."
         ),
-        sensitivity="high",
+        sensitivity=Sensitivity.HIGH,
         interactions=[
             ParameterInteraction("dbscan.min_samples", "modulates",
                 "eps and min_samples jointly define density — larger eps with larger min_samples can give similar results"),
@@ -791,7 +803,7 @@ PARAMETERS: list[AlgorithmParameter] = [
             "Controls noise sensitivity. Higher values = stricter density requirement = more noise points. "
             "min_samples=1 means every point is a core point (no noise, every isolated point is its own cluster)."
         ),
-        sensitivity="medium",
+        sensitivity=Sensitivity.MEDIUM,
         interactions=[
             ParameterInteraction("dbscan.eps", "modulates",
                 "Jointly defines density with eps"),
@@ -810,7 +822,7 @@ PARAMETERS: list[AlgorithmParameter] = [
         valid_range={"values": ["euclidean", "cosine"]},
         description="Distance metric.",
         semantic_meaning="Determines what 'close' means. Affects valid eps range.",
-        sensitivity="high",
+        sensitivity=Sensitivity.HIGH,
     ),
 
     # === HDBSCAN ===
@@ -825,7 +837,7 @@ PARAMETERS: list[AlgorithmParameter] = [
             "The primary tuning knob. Smaller = more fine-grained clusters. "
             "Larger = only keeps robust, well-populated clusters."
         ),
-        sensitivity="high",
+        sensitivity=Sensitivity.HIGH,
         tips=[
             "Start with min_cluster_size=15 for most datasets",
             "For small datasets (<500), try 5-10",
@@ -844,7 +856,7 @@ PARAMETERS: list[AlgorithmParameter] = [
             "Controls how conservative the density estimate is. Higher = more conservative "
             "(smooths out local density spikes). Usually fine at default."
         ),
-        sensitivity="low",
+        sensitivity=Sensitivity.LOW,
         tips=[
             "Leave as None (= min_cluster_size) unless you have specific density requirements",
             "Lower min_samples makes clusters more 'ragged' at borders",
@@ -861,7 +873,7 @@ PARAMETERS: list[AlgorithmParameter] = [
             "EOM (Excess of Mass): stability-based, finds clusters at mixed scales. "
             "Leaf: uses leaf nodes, tends to produce more evenly-sized clusters."
         ),
-        sensitivity="medium",
+        sensitivity=Sensitivity.MEDIUM,
         tips=[
             "EOM is usually better — it finds the most stable clusters at any scale",
             "Leaf can be better when you want uniformly-sized clusters",
@@ -875,7 +887,7 @@ PARAMETERS: list[AlgorithmParameter] = [
         valid_range={"values": ["euclidean", "cosine"]},
         description="Distance metric.",
         semantic_meaning="Same as DBSCAN.",
-        sensitivity="high",
+        sensitivity=Sensitivity.HIGH,
     ),
 
     # === AgglomerativeClustering ===
@@ -887,7 +899,7 @@ PARAMETERS: list[AlgorithmParameter] = [
         valid_range={"min": 1, "max": "n_samples"},
         description="Target number of clusters.",
         semantic_meaning="Where to cut the dendrogram.",
-        sensitivity="high",
+        sensitivity=Sensitivity.HIGH,
     ),
     AlgorithmParameter(
         algorithm_id="agglomerative",
@@ -902,7 +914,7 @@ PARAMETERS: list[AlgorithmParameter] = [
             "Average: mean distance — balanced approach. "
             "Single: min distance — can find elongated/chain-like clusters but prone to chaining artifacts."
         ),
-        sensitivity="high",
+        sensitivity=Sensitivity.HIGH,
         interactions=[
             ParameterInteraction("agglomerative.metric", "conflicts",
                 "Ward linkage requires Euclidean metric — raises ValueError otherwise"),
@@ -923,7 +935,7 @@ PARAMETERS: list[AlgorithmParameter] = [
         valid_range={"values": ["euclidean", "manhattan", "cosine"]},
         description="Distance metric. Note: ward linkage requires euclidean.",
         semantic_meaning="What 'distance' means for merge decisions.",
-        sensitivity="high",
+        sensitivity=Sensitivity.HIGH,
         constraints=["Must be 'euclidean' when linkage='ward'"],
     ),
 
@@ -936,7 +948,7 @@ PARAMETERS: list[AlgorithmParameter] = [
         valid_range={"min": 1, "max": "n_samples"},
         description="Target number of clusters for spherical K-means.",
         semantic_meaning="Grouping granularity for embeddings. Default 50 reflects typical embedding corpus diversity.",
-        sensitivity="high",
+        sensitivity=Sensitivity.HIGH,
         tips=[
             "Start with k=sqrt(n/2) as a heuristic",
             "For OpenAI embeddings of documents, 20-100 is typical",
@@ -956,7 +968,7 @@ PARAMETERS: list[AlgorithmParameter] = [
             "128 is the sweet spot for most embedding models (captures 90%+ variance from 1536d). "
             "None skips PCA — use for already-reduced data or dimensions <= 256."
         ),
-        sensitivity="high",
+        sensitivity=Sensitivity.HIGH,
         interactions=[
             ParameterInteraction("embedding_cluster.n_clusters", "modulates",
                 "Higher reduction_dim shifts optimal k upward — more preserved dimensions = more distinguishable clusters"),
@@ -977,7 +989,7 @@ PARAMETERS: list[AlgorithmParameter] = [
         valid_range={"min": 1},
         description="Max iterations for spherical K-means.",
         semantic_meaning="Usually converges in 10-30 iterations. 100 is a generous safety margin.",
-        sensitivity="low",
+        sensitivity=Sensitivity.LOW,
     ),
     AlgorithmParameter(
         algorithm_id="embedding_cluster",
@@ -987,7 +999,7 @@ PARAMETERS: list[AlgorithmParameter] = [
         valid_range={"min": 0.0},
         description="Convergence tolerance on angular shift.",
         semantic_meaning="Tighter than standard K-means (1e-6 vs 1e-4) because spherical geometry needs more precision.",
-        sensitivity="low",
+        sensitivity=Sensitivity.LOW,
     ),
     AlgorithmParameter(
         algorithm_id="embedding_cluster",
@@ -997,7 +1009,7 @@ PARAMETERS: list[AlgorithmParameter] = [
         valid_range={"min": 1},
         description="Number of independent starts.",
         semantic_meaning="Lower default (5 vs 10) because embedding data is typically cleaner than tabular data.",
-        sensitivity="medium",
+        sensitivity=Sensitivity.MEDIUM,
     ),
     AlgorithmParameter(
         algorithm_id="embedding_cluster",
@@ -1011,7 +1023,7 @@ PARAMETERS: list[AlgorithmParameter] = [
             "Matryoshka: prefix truncation (instant, no fitting), only for Matryoshka-trained models "
             "(OpenAI text-embedding-3-*, Cohere embed-v3). Matryoshka is 1000x faster but model-specific."
         ),
-        sensitivity="medium",
+        sensitivity=Sensitivity.MEDIUM,
         tips=[
             "Use 'pca' unless you know your model is Matryoshka-trained",
             "Matryoshka models: OpenAI text-embedding-3-small/large, Cohere embed-v3",
@@ -1026,7 +1038,7 @@ PARAMETERS: list[AlgorithmParameter] = [
         valid_range=None,
         description="Random seed for PCA and initialization.",
         semantic_meaning="Controls both PCA random matrix and K-means++ seeding.",
-        sensitivity="low",
+        sensitivity=Sensitivity.LOW,
     ),
 ]
 
@@ -1199,7 +1211,7 @@ ANTI_PATTERNS: list[AntiPattern] = [
             "preserves angular relationships which is what matters for semantic similarity."
         ),
         fix="Use EmbeddingCluster (handles normalization + PCA automatically) or manually L2-normalize and use cosine metric.",
-        severity="error",
+        severity=Severity.ERROR,
     ),
     AntiPattern(
         id="kmeans_no_pca_highd",
@@ -1210,7 +1222,7 @@ ANTI_PATTERNS: list[AntiPattern] = [
             "Silhouette scores typically jump from ~0.05 to ~0.25 after PCA."
         ),
         fix="Use EmbeddingCluster (includes PCA) or apply EmbeddingReducer first, then cluster the reduced data.",
-        severity="error",
+        severity=Severity.ERROR,
     ),
     AntiPattern(
         id="dbscan_highd",
@@ -1221,7 +1233,7 @@ ANTI_PATTERNS: list[AntiPattern] = [
             "due to distance concentration."
         ),
         fix="Reduce dimensionality first (PCA to d <= 16), or use HDBSCAN which is more robust to high-d.",
-        severity="warning",
+        severity=Severity.WARNING,
     ),
     AntiPattern(
         id="dbscan_variable_density",
@@ -1231,7 +1243,7 @@ ANTI_PATTERNS: list[AntiPattern] = [
             "Dense clusters will be found but sparse clusters will be split or marked as noise."
         ),
         fix="Use HDBSCAN — it builds a hierarchy of densities and extracts clusters at their natural scale.",
-        severity="warning",
+        severity=Severity.WARNING,
     ),
     AntiPattern(
         id="hdbscan_large_n",
@@ -1241,14 +1253,14 @@ ANTI_PATTERNS: list[AntiPattern] = [
             "At 100K it's ~40GB."
         ),
         fix="Subsample, or use MiniBatchKMeans/KMeans with a predetermined k. For embeddings, use EmbeddingCluster.",
-        severity="warning",
+        severity=Severity.WARNING,
     ),
     AntiPattern(
         id="ward_non_euclidean",
         description="Using Ward linkage with non-Euclidean metric",
         why_bad="Ward linkage minimizes variance, which is only meaningful in Euclidean space. The code will raise ValueError.",
         fix="Use metric='euclidean' with Ward, or switch to 'complete'/'average' linkage for non-Euclidean metrics.",
-        severity="error",
+        severity=Severity.ERROR,
     ),
     AntiPattern(
         id="silhouette_panic_highd",
@@ -1258,7 +1270,7 @@ ANTI_PATTERNS: list[AntiPattern] = [
             "A score of 0.15 in 1536d might be excellent. Always compute silhouette on PCA-reduced data."
         ),
         fix="Apply PCA first, then compute silhouette on the reduced data. Compare scores at different k values relatively, not absolutely.",
-        severity="info",
+        severity=Severity.INFO,
     ),
     AntiPattern(
         id="matryoshka_wrong_model",
@@ -1269,7 +1281,7 @@ ANTI_PATTERNS: list[AntiPattern] = [
             "the first N dimensions are arbitrary and truncation destroys information."
         ),
         fix="Use reduction='pca' for non-Matryoshka models. Known Matryoshka models: OpenAI text-embedding-3-*, Cohere embed-v3.",
-        severity="error",
+        severity=Severity.ERROR,
     ),
 ]
 
@@ -1280,7 +1292,7 @@ ANTI_PATTERNS: list[AntiPattern] = [
 METRIC_INTERPRETATIONS: list[MetricInterpretation] = [
 
     MetricInterpretation(
-        metric_name="silhouette_score",
+        metric_name="silhouette",
         range=(-1.0, 1.0),
         direction="higher_better",
         thresholds={
@@ -1298,7 +1310,7 @@ METRIC_INTERPRETATIONS: list[MetricInterpretation] = [
         ],
     ),
     MetricInterpretation(
-        metric_name="calinski_harabasz_score",
+        metric_name="calinski_harabasz",
         range=(0.0, float("inf")),
         direction="higher_better",
         thresholds={
@@ -1314,7 +1326,7 @@ METRIC_INTERPRETATIONS: list[MetricInterpretation] = [
         ],
     ),
     MetricInterpretation(
-        metric_name="davies_bouldin_score",
+        metric_name="davies_bouldin",
         range=(0.0, float("inf")),
         direction="lower_better",
         thresholds={
@@ -1330,6 +1342,8 @@ METRIC_INTERPRETATIONS: list[MetricInterpretation] = [
         ],
     ),
 ]
+
+_ANTI_PATTERN_MAP: dict[str, AntiPattern] = {a.id: a for a in ANTI_PATTERNS}
 
 PATHOLOGY_SIGNATURES: list[PathologySignature] = [
 
@@ -1521,6 +1535,8 @@ PATHOLOGY_SIGNATURES: list[PathologySignature] = [
 ]
 
 
+_PATHOLOGY_MAP: dict[str, PathologySignature] = {p.id: p for p in PATHOLOGY_SIGNATURES}
+
 # ---------------------------------------------------------------------------
 # Query interface
 # ---------------------------------------------------------------------------
@@ -1614,38 +1630,38 @@ def check_anti_patterns(
     if profile and profile.dimensionality in (Dimensionality.HIGH, Dimensionality.VERY_HIGH):
         metric = params.get("metric", "euclidean")
         if metric == "euclidean" and profile.source_type in ("openai", "cohere", "voyage", "embedding"):
-            triggered.append(next(a for a in ANTI_PATTERNS if a.id == "euclidean_highd_embeddings"))
+            triggered.append(_ANTI_PATTERN_MAP["euclidean_highd_embeddings"])
 
     # KMeans without PCA on high-d
     if algorithm_id == "kmeans" and profile:
         if profile.dimensionality in (Dimensionality.HIGH, Dimensionality.VERY_HIGH):
-            triggered.append(next(a for a in ANTI_PATTERNS if a.id == "kmeans_no_pca_highd"))
+            triggered.append(_ANTI_PATTERN_MAP["kmeans_no_pca_highd"])
 
     # DBSCAN on high-d
     if algorithm_id == "dbscan" and profile:
         if profile.dimensionality in (Dimensionality.HIGH, Dimensionality.VERY_HIGH):
-            triggered.append(next(a for a in ANTI_PATTERNS if a.id == "dbscan_highd"))
+            triggered.append(_ANTI_PATTERN_MAP["dbscan_highd"])
 
     # DBSCAN with variable density
     if algorithm_id == "dbscan" and profile:
         if profile.density == DensityProfile.VARIABLE:
-            triggered.append(next(a for a in ANTI_PATTERNS if a.id == "dbscan_variable_density"))
+            triggered.append(_ANTI_PATTERN_MAP["dbscan_variable_density"])
 
     # HDBSCAN on very large data
     if algorithm_id == "hdbscan" and profile:
         if profile.scale == DataScale.VERY_LARGE:
-            triggered.append(next(a for a in ANTI_PATTERNS if a.id == "hdbscan_large_n"))
+            triggered.append(_ANTI_PATTERN_MAP["hdbscan_large_n"])
 
     # Ward + non-euclidean
     if algorithm_id == "agglomerative":
         if params.get("linkage") == "ward" and params.get("metric", "euclidean") != "euclidean":
-            triggered.append(next(a for a in ANTI_PATTERNS if a.id == "ward_non_euclidean"))
+            triggered.append(_ANTI_PATTERN_MAP["ward_non_euclidean"])
 
     # Matryoshka with wrong model
     if algorithm_id == "embedding_cluster":
         if params.get("reduction") == "matryoshka":
             if profile and profile.source_type not in ("openai", "cohere"):
-                triggered.append(next(a for a in ANTI_PATTERNS if a.id == "matryoshka_wrong_model"))
+                triggered.append(_ANTI_PATTERN_MAP["matryoshka_wrong_model"])
 
     return triggered
 
@@ -1668,30 +1684,30 @@ def diagnose_results(
 
         # One giant cluster
         if total_points > 0 and max_size / total_points > 0.6:
-            triggered.append(next(p for p in PATHOLOGY_SIGNATURES if p.id == "one_giant_cluster"))
+            triggered.append(_PATHOLOGY_MAP["one_giant_cluster"])
 
         # Too many singletons
         singletons = sum(1 for s in cluster_sizes if s <= 3)
         if len(cluster_sizes) > 3 and singletons / len(cluster_sizes) > 0.3:
-            triggered.append(next(p for p in PATHOLOGY_SIGNATURES if p.id == "too_many_singletons"))
+            triggered.append(_PATHOLOGY_MAP["too_many_singletons"])
 
         # Highly uneven
         if max_size > 0 and min_size > 0 and max_size / min_size > 10 and len(cluster_sizes) > 2:
-            triggered.append(next(p for p in PATHOLOGY_SIGNATURES if p.id == "uneven_cluster_sizes"))
+            triggered.append(_PATHOLOGY_MAP["uneven_cluster_sizes"])
 
     # All noise
     if n_total > 0 and n_noise / n_total > 0.8:
-        triggered.append(next(p for p in PATHOLOGY_SIGNATURES if p.id == "all_noise"))
+        triggered.append(_PATHOLOGY_MAP["all_noise"])
 
     # Slow convergence
     if n_iter is not None and max_iter is not None and n_iter >= max_iter:
-        triggered.append(next(p for p in PATHOLOGY_SIGNATURES if p.id == "slow_convergence"))
+        triggered.append(_PATHOLOGY_MAP["slow_convergence"])
 
     # Low silhouette
-    sil = metric_scores.get("silhouette_score")
+    sil = metric_scores.get("silhouette")
     if sil is not None and sil < 0.1:
         # Could be one_giant_cluster or just bad clustering — check if already flagged
         if not any(p.id == "one_giant_cluster" for p in triggered):
-            triggered.append(next(p for p in PATHOLOGY_SIGNATURES if p.id == "unstable_across_runs"))
+            triggered.append(_PATHOLOGY_MAP["unstable_across_runs"])
 
     return triggered

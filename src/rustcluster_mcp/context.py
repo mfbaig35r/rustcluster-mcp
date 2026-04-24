@@ -282,7 +282,6 @@ class _ClusterContext:
         confidence_threshold=None,
         adaptive_threshold=False,
         adaptive_percentile="p10",
-        true_labels=None,
         title=None,
         save_path="snapshot_map.png",
     ) -> str:
@@ -303,7 +302,6 @@ class _ClusterContext:
             confidence_threshold: Optional rejection threshold for assign_with_scores.
             adaptive_threshold: Use per-cluster adaptive thresholds (requires calibration).
             adaptive_percentile: Percentile for adaptive threshold: 'p5','p10','p25','p50'.
-            true_labels: Optional ground-truth labels for comparison (shown as marker shapes).
             title: Plot title. Auto-generated if None.
             save_path: Output path (captured as artifact).
 
@@ -346,26 +344,24 @@ class _ClusterContext:
         cmap = colormaps.get_cmap("tab20" if k <= 20 else "hsv")
 
         if color_by == "cluster":
-            # Color by cluster, opacity by confidence
+            # Vectorized: build RGBA array with per-point alpha from confidence
+            colors_rgba = _rc_np.zeros((len(coords), 4))
             for cluster_id in range(k):
                 mask = accepted_mask & (labels == cluster_id)
                 if not mask.any():
                     continue
                 color = cmap(cluster_id / max(k - 1, 1))
-                alpha = _rc_np.clip(confidences[mask], 0.15, 1.0)
+                colors_rgba[mask, :3] = color[:3]
+                colors_rgba[mask, 3] = _rc_np.clip(confidences[mask], 0.15, 1.0)
+                # Legend entry (empty scatter for label only)
+                ax.scatter([], [], c=[color], s=20,
+                           label=f"Cluster {cluster_id} (n={int(mask.sum())})")
+            # Single draw call for all accepted points
+            if accepted_mask.any():
                 ax.scatter(
-                    coords[mask, 0], coords[mask, 1],
-                    c=[color], alpha=float(_rc_np.mean(alpha)),
-                    s=20, label=f"Cluster {cluster_id} (n={int(mask.sum())})",
-                    edgecolors="none",
+                    coords[accepted_mask, 0], coords[accepted_mask, 1],
+                    c=colors_rgba[accepted_mask], s=15, edgecolors="none",
                 )
-                # Per-point alpha for high-res
-                for j in _rc_np.where(mask)[0]:
-                    ax.scatter(
-                        coords[j, 0], coords[j, 1],
-                        c=[color], alpha=float(confidences[j]),
-                        s=15, edgecolors="none",
-                    )
 
         elif color_by == "confidence":
             sc = ax.scatter(

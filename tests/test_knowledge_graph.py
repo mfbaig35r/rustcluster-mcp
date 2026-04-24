@@ -369,7 +369,7 @@ class TestDiagnosis:
 
     def test_low_silhouette_unstable(self):
         results = diagnose_results(
-            metric_scores={"silhouette_score": 0.05},
+            metric_scores={"silhouette": 0.05},
             cluster_sizes=[100, 100, 100],
         )
         ids = {p.id for p in results}
@@ -377,7 +377,7 @@ class TestDiagnosis:
 
     def test_no_pathology(self):
         results = diagnose_results(
-            metric_scores={"silhouette_score": 0.5},
+            metric_scores={"silhouette": 0.5},
             cluster_sizes=[100, 100, 100],
         )
         assert results == []
@@ -398,9 +398,9 @@ class TestMetricInterpretations:
 
     def test_directions(self):
         by_name = {m.metric_name: m for m in METRIC_INTERPRETATIONS}
-        assert by_name["silhouette_score"].direction == "higher_better"
-        assert by_name["calinski_harabasz_score"].direction == "higher_better"
-        assert by_name["davies_bouldin_score"].direction == "lower_better"
+        assert by_name["silhouette"].direction == "higher_better"
+        assert by_name["calinski_harabasz"].direction == "higher_better"
+        assert by_name["davies_bouldin"].direction == "lower_better"
 
     def test_all_have_thresholds(self):
         for m in METRIC_INTERPRETATIONS:

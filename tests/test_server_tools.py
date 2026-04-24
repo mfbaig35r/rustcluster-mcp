@@ -405,7 +405,7 @@ class TestDiagnose:
     async def test_from_metrics(self):
         result = await diagnose(
             description="clusters don't look right",
-            metrics={"silhouette_score": 0.05},
+            metrics={"silhouette": 0.05},
             cluster_sizes=[800, 50, 50, 50, 50],
         )
         ids = {p["id"] for p in result["pathologies_detected"]}

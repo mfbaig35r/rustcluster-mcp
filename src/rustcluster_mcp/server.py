@@ -65,6 +65,28 @@ Knowledge tools (no data needed):
 # Helpers
 # ---------------------------------------------------------------------------
 
+def _classify_dimensionality(d: int) -> Dimensionality:
+    """Classify feature count into dimensionality tier."""
+    if d <= 10:
+        return Dimensionality.LOW
+    elif d <= 100:
+        return Dimensionality.MEDIUM
+    elif d <= 768:
+        return Dimensionality.HIGH
+    return Dimensionality.VERY_HIGH
+
+
+def _classify_scale(n: int) -> DataScale:
+    """Classify sample count into scale tier."""
+    if n < 1_000:
+        return DataScale.SMALL
+    elif n < 50_000:
+        return DataScale.MEDIUM
+    elif n < 500_000:
+        return DataScale.LARGE
+    return DataScale.VERY_LARGE
+
+
 def success_response(**data: Any) -> dict[str, Any]:
     return {"status": "success", **data}
 
@@ -76,36 +98,17 @@ def error_response(message: str, error_type: str = "error") -> dict[str, Any]:
 def _load_array(path: str) -> np.ndarray:
     """Load a numpy array from .npy or .npz file."""
     if path.endswith(".npz"):
-        f = np.load(path)
-        # Return the first array in the archive
-        key = list(f.keys())[0]
-        return f[key]
+        with np.load(path) as f:
+            key = list(f.keys())[0]
+            return f[key]
     return np.load(path)
 
 
-def _profile_data(X: np.ndarray) -> dict[str, Any]:
+def _profile_data(X: np.ndarray) -> tuple[dict[str, Any], DataProfile]:
     """Compute data characteristics for the knowledge graph."""
     n, d = X.shape
-
-    # Dimensionality
-    if d <= 10:
-        dim = Dimensionality.LOW
-    elif d <= 100:
-        dim = Dimensionality.MEDIUM
-    elif d <= 768:
-        dim = Dimensionality.HIGH
-    else:
-        dim = Dimensionality.VERY_HIGH
-
-    # Scale
-    if n < 1_000:
-        scale = DataScale.SMALL
-    elif n < 50_000:
-        scale = DataScale.MEDIUM
-    elif n < 500_000:
-        scale = DataScale.LARGE
-    else:
-        scale = DataScale.VERY_LARGE
+    dim = _classify_dimensionality(d)
+    scale = _classify_scale(n)
 
     # L2 normalization check
     norms = np.linalg.norm(X, axis=1)
@@ -157,7 +160,7 @@ def _profile_data(X: np.ndarray) -> dict[str, Any]:
         except Exception:
             pass
 
-    return {
+    profile_dict = {
         "n_samples": n,
         "n_features": d,
         "dimensionality": dim.value,
@@ -171,16 +174,16 @@ def _profile_data(X: np.ndarray) -> dict[str, Any]:
         "dtype": str(X.dtype),
         "has_nan": bool(np.isnan(X).any()),
         "has_inf": bool(np.isinf(X).any()),
-        # internal
-        "_profile": DataProfile(
-            dimensionality=dim,
-            scale=scale,
-            normalization=norm_state,
-            density=density,
-            source_type=None,
-            intrinsic_dim_estimate=intrinsic_dim,
-        ),
     }
+    data_profile = DataProfile(
+        dimensionality=dim,
+        scale=scale,
+        normalization=norm_state,
+        density=density,
+        source_type=None,
+        intrinsic_dim_estimate=intrinsic_dim,
+    )
+    return profile_dict, data_profile
 
 
 # ===========================================================================
@@ -211,13 +214,12 @@ async def analyze_data(
         if X.ndim != 2:
             return error_response(f"Expected 2D array, got {X.ndim}D", "validation_error")
 
-        profile = _profile_data(X)
-        internal_profile = profile.pop("_profile")
-        internal_profile.source_type = source_type
+        profile, data_profile = _profile_data(X)
+        data_profile.source_type = source_type
         profile["source_type"] = source_type
 
         # Get initial recommendations
-        rules = match_decision_rules(internal_profile)
+        rules = match_decision_rules(data_profile)
         if rules:
             top = rules[0]
             profile["initial_recommendation"] = {
@@ -317,24 +319,8 @@ async def recommend_algorithm(
     """
     try:
         # Build data profile
-        if n_features <= 10:
-            dim = Dimensionality.LOW
-        elif n_features <= 100:
-            dim = Dimensionality.MEDIUM
-        elif n_features <= 768:
-            dim = Dimensionality.HIGH
-        else:
-            dim = Dimensionality.VERY_HIGH
-
-        if n_samples < 1_000:
-            scale = DataScale.SMALL
-        elif n_samples < 50_000:
-            scale = DataScale.MEDIUM
-        elif n_samples < 500_000:
-            scale = DataScale.LARGE
-        else:
-            scale = DataScale.VERY_LARGE
-
+        dim = _classify_dimensionality(n_features)
+        scale = _classify_scale(n_samples)
         norm_state = NormalizationState(normalization) if normalization != "unknown" else NormalizationState.UNKNOWN
 
         profile = DataProfile(
@@ -580,17 +566,8 @@ async def suggest_config(
         # Check for anti-patterns in the suggested config
         param_values = {name: s["suggested_value"] for name, s in config.items()}
 
-        if n_features <= 10:
-            dim = Dimensionality.LOW
-        elif n_features <= 100:
-            dim = Dimensionality.MEDIUM
-        elif n_features <= 768:
-            dim = Dimensionality.HIGH
-        else:
-            dim = Dimensionality.VERY_HIGH
-
         profile = DataProfile(
-            dimensionality=dim,
+            dimensionality=_classify_dimensionality(n_features),
             scale=DataScale.SMALL,  # not critical for anti-pattern check
             normalization=NormalizationState(normalization) if normalization != "unknown" else NormalizationState.RAW,
             density=DensityProfile.UNIFORM,
@@ -1377,18 +1354,9 @@ async def check_config(
 
         profile = None
         if n_features is not None:
-            if n_features <= 10:
-                dim = Dimensionality.LOW
-            elif n_features <= 100:
-                dim = Dimensionality.MEDIUM
-            elif n_features <= 768:
-                dim = Dimensionality.HIGH
-            else:
-                dim = Dimensionality.VERY_HIGH
-
             norm_state = NormalizationState(normalization) if normalization else NormalizationState.UNKNOWN
             profile = DataProfile(
-                dimensionality=dim,
+                dimensionality=_classify_dimensionality(n_features),
                 scale=DataScale.MEDIUM,
                 normalization=norm_state,
                 density=DensityProfile.UNIFORM,
