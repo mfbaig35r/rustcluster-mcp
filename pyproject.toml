@@ -36,6 +36,7 @@ viz = [
 ]
 dev = [
     "pytest>=7",
+    "pytest-asyncio>=0.23",
     "ruff",
     "mypy>=1.0",
 ]
@@ -50,10 +51,13 @@ rustcluster-mcp = "rustcluster_mcp.server:main"
 packages = ["src/rustcluster_mcp"]
 
 [tool.ruff]
-line-length = 100
+line-length = 120
 
 [tool.ruff.lint]
 select = ["E", "F", "I"]
+
+[tool.ruff.lint.per-file-ignores]
+"src/rustcluster_mcp/knowledge_graph.py" = ["E501"]
 
 [tool.mypy]
 python_version = "3.11"
@@ -68,3 +72,5 @@ ignore_missing_imports = true
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+asyncio_mode = "auto"
+markers = ["slow: integration tests using real rustcluster"]

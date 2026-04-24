@@ -8,8 +8,6 @@ parameter sweeps, diagnoses issues, and explains why.
 
 from __future__ import annotations
 
-import json
-import traceback
 from typing import Any
 
 import numpy as np
@@ -18,16 +16,13 @@ from mcp.server.fastmcp import FastMCP
 from .context import CLUSTER_CONTEXT_CODE, CLUSTER_REQUIRED_PACKAGES
 from .knowledge_graph import (
     ALGORITHMS,
-    ALGORITHM_RELATIONSHIPS,
-    ANTI_PATTERNS,
     METRIC_INTERPRETATIONS,
-    PARAMETERS,
     PATHOLOGY_SIGNATURES,
     AlgorithmCategory,
     DataProfile,
     DataScale,
-    Dimensionality,
     DensityProfile,
+    Dimensionality,
     NormalizationState,
     check_anti_patterns,
     diagnose_results,
@@ -244,11 +239,20 @@ async def analyze_data(
         # Check for obvious anti-patterns based on data alone
         warnings = []
         if profile["has_nan"]:
-            warnings.append("Data contains NaN values — all rustcluster algorithms will reject this. Clean your data first.")
+            warnings.append(
+                "Data contains NaN values — all rustcluster algorithms will reject this. "
+                "Clean your data first."
+            )
         if profile["has_inf"]:
-            warnings.append("Data contains Inf values — all rustcluster algorithms will reject this. Clean your data first.")
+            warnings.append(
+                "Data contains Inf values — all rustcluster algorithms will reject this. "
+                "Clean your data first."
+            )
         if profile["normalization"] == "mixed_scale" and source_type in ("openai", "cohere", "voyage"):
-            warnings.append(f"Data from {source_type} is expected to be L2-normalized but appears mixed-scale. Check for preprocessing issues.")
+            warnings.append(
+                f"Data from {source_type} is expected to be L2-normalized "
+                "but appears mixed-scale. Check for preprocessing issues."
+            )
         if profile["intrinsic_dimensionality"] and profile["n_features"] > 100:
             ratio = profile["intrinsic_dimensionality"] / profile["n_features"]
             if ratio < 0.2:
@@ -824,7 +828,8 @@ async def compare_configs(
                 elif algo_id == "hdbscan":
                     model = rustcluster.HDBSCAN(**{k: v for k, v in params.items() if k != "random_state"})
                 elif algo_id == "agglomerative":
-                    model = rustcluster.AgglomerativeClustering(**{k: v for k, v in params.items() if k != "random_state"})
+                    filtered = {k: v for k, v in params.items() if k != "random_state"}
+                    model = rustcluster.AgglomerativeClustering(**filtered)
                 else:
                     comparison.append({"label": label, "error": f"Unknown algorithm: {algo_id}"})
                     continue
@@ -842,9 +847,12 @@ async def compare_configs(
 
                 metrics = {}
                 if n_clusters >= 2:
-                    metrics["silhouette"] = round(float(rustcluster.silhouette_score(eval_data, labels)), 4)
-                    metrics["calinski_harabasz"] = round(float(rustcluster.calinski_harabasz_score(eval_data, labels)), 2)
-                    metrics["davies_bouldin"] = round(float(rustcluster.davies_bouldin_score(eval_data, labels)), 4)
+                    sil = float(rustcluster.silhouette_score(eval_data, labels))
+                    ch = float(rustcluster.calinski_harabasz_score(eval_data, labels))
+                    db = float(rustcluster.davies_bouldin_score(eval_data, labels))
+                    metrics["silhouette"] = round(sil, 4)
+                    metrics["calinski_harabasz"] = round(ch, 2)
+                    metrics["davies_bouldin"] = round(db, 4)
 
                 # Cluster size distribution
                 unique, counts = np.unique(labels[labels >= 0], return_counts=True)
@@ -1255,7 +1263,8 @@ async def explain_parameter(algorithm: str, parameter: str) -> dict[str, Any]:
         param = next((p for p in params if p.name == parameter), None)
         if not param:
             valid = ", ".join(p.name for p in params)
-            return error_response(f"Unknown parameter '{parameter}' for {algorithm}. Valid: {valid}", "validation_error")
+            msg = f"Unknown parameter '{parameter}' for {algorithm}. Valid: {valid}"
+            return error_response(msg, "validation_error")
 
         return success_response(
             algorithm=algorithm,
@@ -1440,7 +1449,7 @@ async def check_config(
 
 # Import marimo-sandbox internals (same pattern as snowbox)
 try:
-    from marimo_sandbox.server import (
+    from marimo_sandbox.server import (  # noqa: F401
         _impl_approve_run,
         _impl_cancel_run,
         _impl_check_setup,
@@ -1734,7 +1743,7 @@ async def check_setup() -> dict[str, Any]:
     result = _impl_check_setup()
     # Add rustcluster-specific checks
     try:
-        import rustcluster
+        import rustcluster as _rc_check  # noqa: F401
         result["rustcluster"] = {
             "installed": True,
             "algorithms": list(ALGORITHMS.keys()),
