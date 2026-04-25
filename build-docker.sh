@@ -47,6 +47,8 @@ cp "$RUSTCLUSTER_DIR/pyproject.toml" "$BUILD_CTX/rustcluster/"
 cp "$RUSTCLUSTER_DIR/README.md" "$BUILD_CTX/rustcluster/"
 cp -r "$RUSTCLUSTER_DIR/src" "$BUILD_CTX/rustcluster/src"
 cp -r "$RUSTCLUSTER_DIR/python" "$BUILD_CTX/rustcluster/python"
+# Cargo.toml references benches — must be present even if we don't run them
+[ -d "$RUSTCLUSTER_DIR/benches" ] && cp -r "$RUSTCLUSTER_DIR/benches" "$BUILD_CTX/rustcluster/benches"
 
 # Copy rustcluster-mcp source
 cp "$SCRIPT_DIR/Dockerfile" "$BUILD_CTX/"
