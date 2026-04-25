@@ -8,231 +8,154 @@ clustering configuration.
 Under the hood is a knowledge graph encoding 7 algorithms, 30+ parameters,
 their interactions, decision rules, anti-patterns, and diagnostic recipes.
 The server queries this graph to analyze your data, recommend algorithms,
-suggest justified configurations, run parameter sweeps, and diagnose problems.
-
-## Features
-
-- **Knowledge graph** — structured ontology of algorithms, parameters,
-  interactions, data characteristics, and decision logic
-- **Advisor tools** — analyze data, recommend algorithms, suggest configs with
-  per-parameter rationale, optimize k, compare configurations, diagnose issues
-- **Knowledge tools** — explain any algorithm or parameter in depth, validate
-  configs against anti-patterns, list algorithms by capability
-- **Sandbox tools** — execute clustering code in auditable Marimo notebooks via
-  [marimo-sandbox](https://github.com/mfbaig35r/marimo-sandbox) with a
-  pre-injected `__cluster__` context
-- **Snapshot visualizations** — 2D projection maps (UMAP/t-SNE/PCA), confidence
-  heatmaps, drift radar charts, hierarchical sunbursts — all as notebook artifacts
-
-## Installation
-
-```bash
-pip install rustcluster-mcp
-```
-
-With sandbox (code execution) support:
-
-```bash
-pip install rustcluster-mcp[sandbox]
-```
-
-With visualization support (UMAP, scikit-learn):
-
-```bash
-pip install rustcluster-mcp[viz]
-```
-
-Everything:
-
-```bash
-pip install rustcluster-mcp[all]
-```
+suggest justified configurations, run clustering directly, and diagnose problems.
 
 ## Quick start
 
-### MCP configuration
+The fastest way to get started — no Python or Rust install needed:
 
-Add to your Claude Desktop / MCP client config:
+```bash
+docker pull fbaig4/rustcluster-mcp:latest
+```
+
+Add to your Claude Code config (`~/.claude.json`):
 
 ```json
 {
   "mcpServers": {
     "rustcluster": {
-      "command": "rustcluster-mcp"
+      "type": "stdio",
+      "command": "docker",
+      "args": [
+        "run", "--rm", "-i",
+        "-v", "/path/to/your/data:/data",
+        "fbaig4/rustcluster-mcp:latest"
+      ]
     }
   }
 }
 ```
 
-### Typical workflow
+Replace `/path/to/your/data` with the directory containing your `.npy`, `.npz`,
+or `.parquet` files. Inside Claude, your data is accessible at `/data/`.
 
-**1. Analyze your data**
+For other setup options (pip install, from source), see [SETUP.md](SETUP.md).
+
+## How it works
+
+### Phase 1 — Plan (advisory tools, no clustering runs)
 
 ```
 > analyze my embeddings at /data/embeddings.npy
 ```
-
-The server profiles dimensionality, normalization state, density, intrinsic
-dimensionality, and flags issues (NaN, mixed scale, etc.).
-
-**2. Get a recommendation**
+Profiles dimensionality, normalization, density, intrinsic dimensionality.
 
 ```
-> what algorithm should I use? I have 50K OpenAI embeddings and I don't know how many clusters
+> what algorithm should I use? 50K OpenAI embeddings, unknown cluster count
 ```
-
-Returns ranked recommendations with rationale — e.g., "EmbeddingCluster with
-reduction_dim=128, or HDBSCAN if you want auto-k discovery."
-
-**3. Get a justified config**
+Returns ranked recommendations: "EmbeddingCluster with reduction_dim=128,
+or HDBSCAN if you want auto-k discovery."
 
 ```
-> give me a config for embedding_cluster on this data
+> give me a config for embedding_cluster
 ```
+Every parameter with a suggested value and data-specific rationale.
 
-Returns every parameter with a suggested value, the default, and a
-data-specific rationale for why this value was chosen.
+### Phase 2 — Execute (run clustering directly)
 
-**4. Find optimal k**
+```
+> cluster my data with embedding_cluster, 20 clusters
+```
+The `fit` tool runs clustering and returns labels, metrics (silhouette, CH, DB),
+and cluster size distribution. No code writing needed.
 
 ```
 > find the best k between 5 and 100
 ```
+Sweeps k values with all three metrics, recommends the best.
 
-Runs a parameter sweep, computes silhouette/CH/DB at each k, and recommends the
-best with rationale.
-
-**5. Diagnose issues**
+### Phase 3 — Refine
 
 ```
 > my clusters look uneven — one cluster has 80% of the points
 ```
+Returns pathology signature, likely causes, and specific fix recipes.
 
-Returns the pathology signature ("One Dominant Cluster"), likely causes, and
-specific fix recipes with parameter changes.
+## Features
 
-### Using `__cluster__` in sandbox runs
-
-```python
-# In any run_python call, __cluster__ is pre-injected:
-data = __cluster__.load("/data/embeddings.npy")
-
-# Fit and get metrics in one call
-result = __cluster__.fit("embedding_cluster", data, n_clusters=20, reduction_dim=128)
-print(result["metrics"])
-# {'silhouette': 0.34, 'calinski_harabasz': 412.5, 'davies_bouldin': 0.89}
-
-# Parameter sweep with visualization
-sweep = __cluster__.sweep_k(data, "embedding_cluster", reduction_dim=128)
-__cluster__.plot_sweep(sweep)  # -> sweep.png artifact
-
-# Snapshot visualization
-snap = __cluster__.snapshot()
-snap.calibrate(data)
-__cluster__.visualize_snapshot(data, snap, method="umap", color_by="cluster",
-                               adaptive_threshold=True)  # -> snapshot_map.png artifact
-
-# Drift monitoring
-report = snap.drift_report(new_data)
-__cluster__.visualize_drift(snap, report)  # -> drift_radar.png artifact
-```
+- **Knowledge graph** — 7 algorithms, 30+ parameters, 9 decision rules, 8
+  anti-patterns, 6 pathology signatures with fix recipes
+- **Direct clustering** — `fit` tool runs clustering on data files without
+  needing a sandbox or writing code
+- **Advisor tools** — analyze data, recommend algorithms, suggest configs,
+  optimize k, compare configs, evaluate quality, diagnose issues
+- **Knowledge tools** — explain any algorithm or parameter, validate configs,
+  list algorithms by capability
+- **Sandbox tools** — execute custom Python in auditable Marimo notebooks with
+  a pre-injected `__cluster__` helper (optional, requires marimo-sandbox)
+- **Snapshot visualizations** — 2D projections, confidence heatmaps, drift radar
+  charts, hierarchical sunbursts
+- **Data formats** — `.npy`, `.npz`, and `.parquet` (parquet requires pyarrow)
 
 ## Tools reference
 
-### Advisor tools (data-driven)
+### Execution tools
 
 | Tool | Description |
 |------|-------------|
-| `analyze_data(data_path, source_type)` | Profile data: dims, normalization, density, intrinsic dimensionality |
-| `recommend_algorithm(n_samples, n_features, ...)` | Ranked algorithm recommendations from data profile + requirements |
-| `suggest_config(algorithm, n_samples, n_features, ...)` | Full justified config with per-parameter rationale |
-| `optimize_k(data_path, algorithm, k_range, ...)` | Parameter sweep across k values with silhouette/CH/DB |
+| `fit(data_path, algorithm, ...)` | Run clustering directly — returns labels, metrics, sizes |
+| `optimize_k(data_path, algorithm, k_range, ...)` | Sweep k values with silhouette/CH/DB scores |
 | `compare_configs(data_path, configs)` | Head-to-head comparison of 2+ configurations |
-| `evaluate_clusters(data_path, labels_path)` | Full quality assessment with pathology detection |
-| `diagnose(description, algorithm, params, metrics, ...)` | Symptom-based diagnosis with fix recipes |
+| `evaluate_clusters(data_path, labels_path)` | Quality assessment with pathology detection |
 
-### Knowledge tools (no data needed)
+### Advisor tools
 
 | Tool | Description |
 |------|-------------|
-| `explain_algorithm(algorithm)` | Deep dive: how it works, params, strengths, relationships |
-| `explain_parameter(algorithm, parameter)` | Semantics, interactions, tuning advice |
-| `list_algorithms(category, supports_noise, ...)` | Browse algorithms with capability filtering |
-| `check_config(algorithm, params, n_features, ...)` | Validate a config against anti-patterns |
+| `analyze_data(data_path, source_type)` | Profile data: dims, normalization, density |
+| `recommend_algorithm(n_samples, n_features, ...)` | Ranked recommendations from data profile + requirements |
+| `suggest_config(algorithm, n_samples, n_features, ...)` | Justified config with per-parameter rationale |
+| `diagnose(description, metrics, cluster_sizes, ...)` | Symptom-based diagnosis with fix recipes |
 
-### Sandbox tools (via marimo-sandbox)
+### Knowledge tools
+
+| Tool | Description |
+|------|-------------|
+| `explain_algorithm(algorithm)` | How it works, params, strengths, relationships |
+| `explain_parameter(algorithm, parameter)` | Semantics, interactions, tuning advice |
+| `list_algorithms(category, supports_noise, ...)` | Browse with capability filtering |
+| `check_config(algorithm, params, ...)` | Validate against anti-patterns |
+
+### Sandbox tools (optional, requires marimo-sandbox)
 
 | Tool | Description |
 |------|-------------|
 | `run_python(code, ...)` | Execute Python with `__cluster__` pre-injected |
 | `get_run` / `list_runs` | Browse run history |
-| `get_run_outputs(run_id)` | Structured `__outputs__` dict from a run |
 | `list_artifacts` / `read_artifact` | Access plots, labels, CSVs from runs |
-| `open_notebook(run_id)` | Open a run in Marimo UI for interactive editing |
-| `rerun` / `diff_runs` | Re-execute or compare runs |
-| `approve_run` / `delete_run` / `check_setup` | Lifecycle management |
+| `open_notebook(run_id)` | Open in Marimo UI for interactive editing |
+| `rerun` / `diff_runs` / `approve_run` / `delete_run` | Run lifecycle |
 
 ## Knowledge graph
 
-The server's intelligence comes from a structured knowledge graph with 5 layers:
-
 | Layer | What it encodes |
 |-------|----------------|
-| **Algorithms** | 7 algorithms: KMeans, MiniBatchKMeans, DBSCAN, HDBSCAN, Agglomerative, EmbeddingCluster, SphericalKMeans |
-| **Parameters** | 30+ parameters with types, defaults, ranges, sensitivity ratings, interactions |
+| **Algorithms** | KMeans, MiniBatchKMeans, DBSCAN, HDBSCAN, Agglomerative, EmbeddingCluster, SphericalKMeans |
+| **Parameters** | 30+ parameters with types, defaults, ranges, sensitivity, interactions |
 | **Data characteristics** | Dimensionality, scale, normalization, density profile, source type |
-| **Decision rules** | 9 condition-based rules mapping data profiles to algorithm recommendations |
-| **Diagnostics** | 3 metric interpretations, 8 anti-patterns, 6 pathology signatures with fix recipes |
-
-### Anti-patterns detected
-
-- Euclidean distance on high-dimensional embeddings
-- KMeans without PCA on 1000+ dimensions
-- DBSCAN on data above 16 dimensions
-- DBSCAN on variable-density data
-- HDBSCAN on datasets above 50K points
-- Ward linkage with non-Euclidean metric
-- Panicking at low silhouette scores on high-dimensional data
-- Matryoshka reduction on non-Matryoshka models
-
-### Pathologies diagnosed
-
-- One dominant cluster (>60% of points)
-- Excessive singleton clusters
-- Everything labeled as noise
-- Unstable clustering across runs
-- Highly uneven cluster sizes
-- Slow convergence / hitting max_iter
-
-## Snapshot visualizations
-
-The `__cluster__` context includes 4 visualization methods, all saved as
-notebook artifacts:
-
-| Method | What it shows |
-|--------|--------------|
-| `visualize_snapshot(X, snap)` | 2D UMAP/t-SNE/PCA projection colored by cluster, opacity by confidence, rejected points as gray X markers |
-| `visualize_confidence(X, snap)` | Per-cluster confidence distribution heatmap |
-| `visualize_drift(snap, report)` | Radar chart of per-cluster relative drift + direction drift |
-| `visualize_hierarchical(X, hier_snap)` | Sunburst chart: inner ring = root clusters, outer ring = child clusters |
+| **Decision rules** | 9 condition-based rules mapping data profiles to recommendations |
+| **Diagnostics** | 3 metric interpretations, 8 anti-patterns, 6 pathology signatures |
 
 ## Development
+
+See [SETUP.md](SETUP.md) for detailed setup instructions. Quick version:
 
 ```bash
 git clone https://github.com/mfbaig35r/rustcluster-mcp
 cd rustcluster-mcp
-pip install -e ".[all]"
-```
-
-```bash
-# Lint
-ruff check src/ tests/
-
-# Type-check
-mypy src/rustcluster_mcp/ --ignore-missing-imports
-
-# Tests
-pytest tests/ -v
+uv venv && uv pip install -e ".[dev]"
+uv run ruff check src/ tests/
+uv run pytest tests/ -m "not slow" -v
 ```
 
 ## License
