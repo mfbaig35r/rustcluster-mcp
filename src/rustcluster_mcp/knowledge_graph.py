@@ -1620,7 +1620,7 @@ def check_anti_patterns(
     profile: DataProfile | None = None,
 ) -> list[AntiPattern]:
     """Check for anti-patterns in a configuration."""
-    triggered = []
+    triggered: list[AntiPattern] = []
 
     algo = ALGORITHMS.get(algorithm_id)
     if not algo:

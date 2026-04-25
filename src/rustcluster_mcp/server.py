@@ -15,9 +15,9 @@ from mcp.server.fastmcp import FastMCP
 
 from .context import CLUSTER_CONTEXT_CODE, CLUSTER_REQUIRED_PACKAGES
 from .knowledge_graph import (
+    _PATHOLOGY_MAP,
     ALGORITHMS,
     METRIC_INTERPRETATIONS,
-    PATHOLOGY_SIGNATURES,
     AlgorithmCategory,
     DataProfile,
     DataScale,
@@ -890,7 +890,7 @@ async def optimize_k(
         import rustcluster
         from rustcluster.experimental import EmbeddingCluster
 
-        results = []
+        results: list[dict[str, Any]] = []
         for k in k_range:
             if k >= n:
                 continue
@@ -944,8 +944,8 @@ async def optimize_k(
         # Find optimal k
         valid = [r for r in results if "error" not in r]
         if valid:
-            best_sil = max(valid, key=lambda r: r["silhouette"])
-            best_db = min(valid, key=lambda r: r["davies_bouldin"])
+            best_sil = max(valid, key=lambda r: r.get("silhouette", -2.0))
+            best_db = min(valid, key=lambda r: r.get("davies_bouldin", float("inf")))
 
             # Weighted recommendation: prefer silhouette, check DB agrees
             recommended_k = best_sil["k"]
@@ -1177,7 +1177,7 @@ async def evaluate_clusters(
                     "caveats": mi.caveats,
                 }
         else:
-            interpretations["warning"] = "Need >= 2 clusters to compute metrics."
+            interpretations["warning"] = {"message": "Need >= 2 clusters to compute metrics."}
 
         # Cluster size analysis
         size_analysis = {
@@ -1311,24 +1311,23 @@ async def diagnose(
 
         already_ids = {d["id"] for d in detected}
         for keyword, pathology_id in keyword_map.items():
-            if keyword in desc_lower and pathology_id not in already_ids:
-                p = next((p for p in PATHOLOGY_SIGNATURES if p.id == pathology_id), None)
-                if p:
-                    detected.append({
-                        "id": p.id,
-                        "name": p.name,
-                        "symptoms": p.symptoms,
-                        "likely_causes": p.likely_causes,
-                        "fixes": [
-                            {
-                                "description": f.description,
-                                "parameter_changes": f.parameter_changes,
-                                "expected_effect": f.expected_effect,
-                            }
-                            for f in p.fixes
-                        ],
-                    })
-                    already_ids.add(pathology_id)
+            if keyword in desc_lower and pathology_id not in already_ids and pathology_id in _PATHOLOGY_MAP:
+                p = _PATHOLOGY_MAP[pathology_id]
+                detected.append({
+                    "id": p.id,
+                    "name": p.name,
+                    "symptoms": p.symptoms,
+                    "likely_causes": p.likely_causes,
+                    "fixes": [
+                        {
+                            "description": f.description,
+                            "parameter_changes": f.parameter_changes,
+                            "expected_effect": f.expected_effect,
+                        }
+                        for f in p.fixes
+                    ],
+                })
+                already_ids.add(pathology_id)
 
         # Check anti-patterns on current config
         anti_warnings = []
@@ -1865,7 +1864,7 @@ async def rerun(run_id: str) -> dict[str, Any]:
     """
     if not _SANDBOX_AVAILABLE:
         return error_response("marimo-sandbox not installed", "dependency_error")
-    return _impl_rerun(run_id)
+    return _impl_rerun(run_id)  # type: ignore[call-arg]
 
 
 @mcp.tool()
@@ -1943,7 +1942,7 @@ async def check_setup() -> dict[str, Any]:
 # Entry point
 # ---------------------------------------------------------------------------
 
-def main():
+def main() -> None:
     mcp.run()
 
 

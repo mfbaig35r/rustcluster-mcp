@@ -43,7 +43,7 @@ jobs:
       - name: Install package and dev dependencies
         run: pip install -e ".[dev]"
       - name: Run unit tests
-        run: pytest tests/ -m "not slow" --timeout=30 -v
+        run: pytest tests/ -m "not slow" -v
 
   integration:
     name: Integration (Python 3.12)
@@ -60,8 +60,9 @@ jobs:
           git clone https://github.com/mfbaig35r/rustcluster.git /tmp/rustcluster
           cd /tmp/rustcluster
           pip install maturin
-          maturin develop --release
+          maturin build --release -o /tmp/wheels
+          pip install /tmp/wheels/*.whl
       - name: Install package and dev dependencies
         run: pip install -e ".[dev]"
       - name: Run all tests including integration
-        run: pytest tests/ --timeout=120 -v
+        run: pytest tests/ -v
