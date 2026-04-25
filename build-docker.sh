@@ -5,12 +5,25 @@
 # and rustcluster-mcp (Python MCP server), then builds the multi-stage image.
 #
 # Usage:
-#   ./build-docker.sh                    # builds with default tag
-#   ./build-docker.sh my-tag             # builds with custom tag
+#   ./build-docker.sh                          # local build for current arch
+#   ./build-docker.sh --push                   # multi-arch build + push to registry
+#   ./build-docker.sh --tag ghcr.io/user/img   # custom tag
+#   ./build-docker.sh --push --tag ghcr.io/mfbaig35r/rustcluster-mcp
 
 set -euo pipefail
 
-TAG="${1:-rustcluster-mcp:latest}"
+TAG="rustcluster-mcp:latest"
+PUSH=false
+PLATFORMS="linux/amd64,linux/arm64"
+
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --push) PUSH=true; shift ;;
+        --tag)  TAG="$2"; shift 2 ;;
+        *)      TAG="$1"; shift ;;
+    esac
+done
+
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 RUSTCLUSTER_DIR="${SCRIPT_DIR}/../rustcluster"
 
@@ -41,8 +54,24 @@ cp "$SCRIPT_DIR/pyproject.toml" "$BUILD_CTX/"
 cp "$SCRIPT_DIR/README.md" "$BUILD_CTX/"
 cp -r "$SCRIPT_DIR/src" "$BUILD_CTX/src"
 
-echo "Building image: $TAG"
-docker build -t "$TAG" "$BUILD_CTX"
+if [ "$PUSH" = true ]; then
+    echo "Building multi-arch image: $TAG"
+    echo "Platforms: $PLATFORMS"
+    echo ""
+
+    # Ensure buildx builder exists
+    docker buildx inspect multiarch >/dev/null 2>&1 || \
+        docker buildx create --name multiarch --use
+
+    docker buildx build \
+        --platform "$PLATFORMS" \
+        --tag "$TAG" \
+        --push \
+        "$BUILD_CTX"
+else
+    echo "Building image for current architecture: $TAG"
+    docker build -t "$TAG" "$BUILD_CTX"
+fi
 
 echo ""
 echo "Done! Run with:"
